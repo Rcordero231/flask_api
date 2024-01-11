@@ -1,5 +1,7 @@
 from app import db
-from datetime import datetime
+import base64
+import os
+from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 
 
@@ -11,7 +13,10 @@ class User(db.Model):
     username = db.Column(db.String, nullable=False, unique=True)
     password = db.Column(db.String, nullable=False)
     date_created = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    
+    posts = db.relationship('Post', backref='author')
+    token = db.Column(db.String(32), index = True, unique=True)
+    token_expiration = db.Column(db.DateTime)
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.set_password(kwargs.get('password', ''))
@@ -29,3 +34,49 @@ class User(db.Model):
 
     def check_password(self, plain_text_password):
         return check_password_hash(self.password, plain_text_password)
+
+    def to_dict(self):
+        return{
+            "id": self.id,
+            "firstName": self.first_name,
+            "lastName": self.last_name,
+            "username": self.username,
+            "email": self.email
+        }
+
+    def get_token(self):
+        now = datetime.utcnow(self)
+        if self.token and self.token_expiration > now + timedelta(minutes=1):
+            return self.token
+        self.token = base64.b64encode(os.urandom(24)).decode('utf-8')
+        self.token_expiration = now + timedelta(hours=1)
+        self.save()
+        return self.token
+
+class Post(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String, nullable=False)
+    body = db.Column(db.String, nullable=False)
+    date_created = db.Column(db.String, nullable=False, default=datetime.utcnow)
+    # In SQL user_id INTEGER NOT NULL, FOREGIN KEY(user_id) REFERENCES user(id)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.save()
+
+    def __repr__(self):
+        return f"<Post {self.id}|{self.title}>"
+
+    def save(self):
+        db.session.add(self)
+        db.session.commit()
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "title": self.title,
+            "body": self.body,
+            "dateCreated": self.date_created,
+            "userId": self.user_id
+        }

@@ -1,9 +1,8 @@
 from flask import request
-from app import app
+from app import app, db
 from fake_data.posts import post_data
-
-
-users = []
+from app.models import User, Post
+from app.auth import basic_auth, token_auth
 
 
 @app.route('/')
@@ -13,6 +12,14 @@ def index():
     return f'Hello World!! - From {first_name} {last_name}'
 
 # USER ENDPOINTS
+@app.route("/token")
+@basic_auth.login_required
+def get_token():
+    user = basic_auth.current_user()
+    token = user.get_token()
+    return {"token":token,
+            "tokenExpiration":user.token_expiration}
+
 
 # Creat new user
 @app.route('/users', methods=['POST'])
@@ -33,29 +40,41 @@ def create_user():
         if missing_fields:
             return {'error': f"{', '.join(missing_fields)} must be in the body"}, 400
         
-    
+
     first_name = data.get('firstName')
     last_name = data.get('lastName')
     username = data.get('username')
     email = data.get('email')
     password = data.get('password')
-    
+
     # Check to see if user is already in database (will be different when we use db)
-    for user in users:
-        if user['username'] == username or user['email'] == email:
-            return {'error': 'A user with that username and/or email already exists'}, 400
+    #  ---------------------------NOT USED ANYMORE---------------------------------
+    # for user in users:
+    #     if user['username'] == username or user['email'] == email:
+    #         return {'error': 'A user with that username and/or email already exists'}, 400
+    ##  ---------------------------NOT USED ANYMORE---------------------------------
+
+    # New User with the db
+    check_users = db.session.execute(db.select(User).where((User.username==username), (User.email==email))).scalars().all()
+    if check_users:
+        return {'Error': 'A user with that username or email already exists'}, 400
     
+
+    # ------------NOT USED ANYMORE---------------
     # Create new user dict and append to users list
-    new_user = {
-        "id": len(users)+1,
-        "firstName": first_name,
-        "lastName": last_name,
-        "username": username,
-        "email": email,
-        "password": password
-    }
-    users.append(new_user)
-    return 'This is the Create User endpoint'
+    # new_user = {
+    #     "id": len(users)+1,
+    #     "firstName": first_name,
+    #     "lastName": last_name,
+    #     "username": username,
+    #     "email": email,
+    #     "password": password
+    # }
+    # users.append(new_user)
+    # ------------NOT USED ANYMORE---------------
+
+    new_user = User(first_name=first_name, last_name=last_name, username=username, email=email, password=password)
+    return new_user, 201
 
 # POST ENDPOINTS
 
@@ -63,22 +82,19 @@ def create_user():
 @app.route('/posts')
 def get_posts():
     # Get the posts from storage (fake data, will setup db tomorrow)
-    posts = post_data
-    return posts
+    posts = db.session.execute(db.select(Post)).scalars().all()
+    return [p.to_dict() for p in posts]
 
 # Get single post by ID
 @app.route('/posts/<int:post_id>')
 def get_post(post_id):
     # Get the posts from storage
-    posts = post_data
+    post = db.session.get(Post, post_id)
     # For each dictionary in the list of post dictionaries
-    for post in posts:
-        # if the key of 'id' on the post dictionary matches the post_id from the URL
-        if post['id'] == post_id:
-            # Return that post dictionary
-            return post
-    # If we loop through all of the posts without returning, the post with that ID does not exist
-    return {'error': f'Post with an ID of {post_id} does not exist'}, 404
+    if post:
+        return post.to_dict()
+    else:
+        return {'error': f'Post with an ID of {post_id} does not exist'}, 404
 
 # Create new Post route
 @app.route('/posts', methods=['POST'])
